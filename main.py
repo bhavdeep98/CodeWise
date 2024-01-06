@@ -1,8 +1,15 @@
 import os
+import glob
+
 import pandas as pd
+
 from googletrans import Translator
 from googlesearch import search
+
+
 import logging
+
+
 
 class Logger:
     def __init__(self, filename='data_extractor.log', level=logging.DEBUG):
@@ -18,34 +25,47 @@ class DataExtractor:
         self.directory = directory
         self.translator = translator
         self.logger = logger
+
     def extract_data(self):
         data = []
 
-        for root, subdirs, files in os.walk(self.directory):
-            try:
-                tag = os.path.basename(root)
+        for root, subdirs, _ in os.walk(self.directory):  # Only iterate through directories
+            subdirs[:] = [d for d in subdirs if not d.startswith('.')]  # Filter out hidden directories
 
-                for subdir in subdirs:
-                    key = subdir
-                    code_file, readme_file = self.find_files(root, subdir, files)
+            if subdirs:  # Process only if there are subdirectories
+                for subdir in subdirs:  # Iterate through each subdirectory
 
-                    if code_file and readme_file:
-                        code_content, extension = self.extract_code_content(code_file)
-                        readme_content = self.translate_readme(readme_file)
+                    # Get the full path to the subdirectory containing the code and README files
+                    subdir_path = os.path.join(root, subdir)
+
+                    for subsubdir_path, _ , files in os.walk(subdir_path):
+                        code_files = []  # Store multiple code files
+                        readme_content = ""
+
+                        tag = subsubdir_path.split("\\")[1]
+                        key = subsubdir_path.split("\\")[-1]
+
                         link = self.find_leetcode_link(key)
-                        data.append({
-                            'tags': tag,
-                            'key': key,
-                            'code_content': code_content,
-                            'extension': extension,
-                            'readme': readme_content,
-                            'link': link
-                        })
-            except Exception as e:
-                self.logger.log_error(f"Error processing directory: {root}", exc_info=True)
-                return None  # Gracefully exit the function
 
-        return pd.DataFrame(data)
+                        if len(files)>0:
+
+                            for file in files:
+                                if file.lower() == "readme.md":
+                                    readme_content = self.translate_readme(file)
+                                else:
+                                    code_content, extension = self.extract_code_content(file)
+                                    code_files.append({'code_content': code_content, 'extension': extension})
+
+
+                            data.append({
+                                        'tags': tag,
+                                        'key': key,
+                                        'code_files': code_files,  # Store multiple code files
+                                        'readme': readme_content,
+                                        'link': link
+                                    })
+
+            return pd.DataFrame(data)
 
     def find_files(self, root, subdir, files):
         try:
@@ -92,7 +112,7 @@ class DataExtractor:
 
     def find_leetcode_link(self, key):
         try:
-            for result in search(key + " leetcode.com", tld="com", lang="en", num=5, stop=5, pause=2):
+            for result in search(key + " leetcode.com", num_results=10, lang="en", proxy=None, advanced=False, sleep_interval=0, timeout=5):
                 if "leetcode.com" in result:
                     return result
             self.logger.log_warning(f"No relevant LeetCode link found for key: {key}")
@@ -117,6 +137,7 @@ if __name__ == '__main__':
     try:
         extractor = DataExtractor(directory, translator, logger)  # Default logger will be used
         df = extractor.extract_data()
+        print(df)
         if df is None:
             print("Data extraction failed due to errors. Check the log for details.")
         else:
